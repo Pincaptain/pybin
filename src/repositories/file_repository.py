@@ -77,16 +77,19 @@ class FileRepository(object):
         path = f'{self.output}\\{stats["name"]}'
 
         # Open the storage file for reading
-        # Set the cursor at the specified position
-        # and read the file line by line to evade
-        # memory leaks
         with open(self.storage, 'r+b') as r_file:
+            # Set the cursor at the specified position
             r_file.seek(stats['position'], os.SEEK_SET)
 
+            # Setup a default buffer size
             buffer_size = 65536
             file_size = stats['size']
 
+            # Create/Replace a write file to load
+            # the bytes into
             with open(path, 'wb') as w_file:
+                # Write chunk by chunk into the file
+                # Until all of the bytes are written
                 while True:
                     if buffer_size > file_size:
                         w_file.write(r_file.read(file_size))
@@ -118,9 +121,66 @@ class FileRepository(object):
             else:
                 raise IdentityNotStoredException(id)
 
-    def destroy_file(self):
-        # TODO - Replace or destroy the file bytes
-        pass
+    # noinspection PyShadowingBuiltins
+    def destroy_file(self, id: str):
+        # Load the stats and setup the variables
+        # of the id specified for destruction
+        stats = self.__load_id(id)
+        buffer_size = 65536
+        file_position = stats['position']
+        file_size = stats['size']
+
+        with open(self.storage, 'wb') as w_file:
+            # Set the cursor to the file position in the storage
+            w_file.seek(file_position, os.SEEK_SET)
+
+            # Replace all the file bytes will null bytes
+            # until all are replaced
+            while file_size != 0:
+                if buffer_size > file_size:
+                    nullbytes = self.__create_nullbytes(file_size)
+                    file_size -= file_size
+                else:
+                    nullbytes = self.__create_nullbytes(buffer_size)
+                    file_size -= buffer_size
+
+                w_file.write(nullbytes)
+
+    # noinspection PyShadowingBuiltins
+    def __destroy_id(self, id: str):
+        # Open the id storage file
+        # with reading permissions
+        with open(self.id_storage, 'r') as r_file:
+            # Read and store the file content
+            content = r_file.read()
+
+            # If there is nothing inside the file
+            # then there is nothing that can be removed
+            if len(content) == 0:
+                return False
+
+            # Load the json contents into ids
+            ids = json.loads(content)
+
+            # Check if a id exists and if it does not
+            # return false
+            if ids.pop(id, None) is None:
+                return False
+
+        # If an id exists then rewrite the new json
+        # to the id storage
+        with open(self.id_storage, 'w') as w_file:
+            w_file.write(json.dumps(ids))
+
+        return True
+
+    # noinspection PyMethodMayBeStatic
+    def __create_nullbytes(self, size):
+        bytes_list = []
+        for i in range(size):
+            bytes_list.append('\x00')
+
+        return ''.join(bytes_list).encode()
 
 
 # Raise this exception when the file provided
