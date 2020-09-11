@@ -130,7 +130,7 @@ class FileRepository(object):
         file_position = stats['position']
         file_size = stats['size']
 
-        with open(self.storage, 'wb') as w_file:
+        with open(self.storage, 'r+b') as w_file:
             # Set the cursor to the file position in the storage
             w_file.seek(file_position, os.SEEK_SET)
 
@@ -145,6 +145,9 @@ class FileRepository(object):
                     file_size -= buffer_size
 
                 w_file.write(nullbytes)
+
+        # Remove the file id from the id storage
+        self.__destroy_id(id)
 
     # noinspection PyShadowingBuiltins
     def __destroy_id(self, id: str):
