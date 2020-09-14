@@ -1,228 +1,293 @@
 import os
 import json
+from abc import ABC, abstractmethod
 
 
-# Repository class used to handle
-# file storing, loading and destroying
-class FileRepository(object):
-    # Initialize the file repository by specifying the
-    # storage path and the output path
-    def __init__(self, storage: str, output: str):
-        self.storage = f'{storage}.bin'
-        self.id_storage = f'{storage}.json'
-        self.output = output
+class IFileRepository(ABC):
+    """
+    Abstract class for a file repository containing the required
+    methods and their signatures.
 
-    # noinspection PyShadowingBuiltins
-    def store_file(self, path: str, id: str):
-        # Check if the file exists
-        if not os.path.exists(path):
-            raise FileNotFoundException(path)
+    This class is the bread and butter of the whole program and
+    as a result of that coding a custom implementation might
+    cause some serious pain and suffering.
+    """
 
-        # Open the file for reading
-        with open(path, 'rb') as r_file:
-            # Get the file stats
-            file_size = os.path.getsize(path)
-            file_extension = os.path.splitext(path)[1]
-            file_name = os.path.basename(path)
+    @abstractmethod
+    def store_file(self, file_path: str, file_id: str):
+        pass
 
-            # Position the cursor at the end of the file
-            # Store the file stats (id, position, size, name and extension)
-            with open(self.storage, 'r+b') as w_file:
+    @abstractmethod
+    def load_file(self, file_id: str):
+        pass
+
+    @abstractmethod
+    def destroy_file(self, file_id: str):
+        pass
+
+
+class FileRepository(IFileRepository):
+    """
+    File repository class used to store, load and destroy files from
+    and to the storage.
+
+    Initialize it by providing the directory of the storage.bin and
+    storage.json files and additionally the output directory.
+    """
+
+    def __init__(self, storage_dir_path: str, output_dir_path: str):
+        """
+        Initialize the file repository by specifying the storage path
+        and the output path.
+
+        :param storage_dir_path: Storage directory path
+        :param output_dir_path: Output directory path
+        """
+
+        self.storage_path = f'{storage_dir_path}.bin'
+        self.id_storage_path = f'{storage_dir_path}.json'
+        self.output_dir_path = output_dir_path
+
+    def store_file(self, file_path: str, file_id: str):
+        """
+        Store the file by appending the file bytes to the end of the storage file
+        and update the id storage with the position, size, name and extension of the new file.
+
+        :param file_path: File path
+        :param file_id: File identity
+        """
+
+        if not os.path.exists(file_path):
+            raise FileNotFoundException(file_path)
+
+        with open(file_path, 'rb') as r_file:
+            file_size = os.path.getsize(file_path)
+            file_name = os.path.basename(file_path)
+            file_extension = os.path.splitext(file_path)[1]
+
+            with open(self.storage_path, 'r+b') as w_file:
                 w_file.seek(0, os.SEEK_END)
-                self.__store_id(id, w_file.tell(), file_size, file_name, file_extension)
 
-                # Begin reading the file line by line
-                # To evade memory errors
-                for bytes in r_file:
-                    w_file.write(bytes)
+                file_position = w_file.tell()
+                self.__store_id(file_id, file_position, file_size, file_name, file_extension)
 
-    # noinspection PyShadowingBuiltins
-    def __store_id(self, id: str, position: int, size: int, name: str, extension: str):
-        # Open the id_storage file for reading
-        with open(self.id_storage, 'r') as r_file:
-            # Read the content of the file
+                for file_bytes in r_file:
+                    w_file.write(file_bytes)
+
+    def __store_id(self, file_id: str, file_position: int, file_size: int, file_name: str, file_extension: str):
+        """
+        Store the file id and stats by loading the json id storage file,
+        appending the key value pair and saving the file once the process
+        is done.
+
+        For an example of this key-value pair you can check the storage.json
+        file though playing around with it is strictly forbidden if
+        you have no idea what it does for it may cause errors and data loss.
+
+        :param file_id: File identity
+        :param file_position: File storage position
+        :param file_size: File size
+        :param file_name: File name and extension
+        :param file_extension: File extension
+        """
+
+        with open(self.id_storage_path, 'r') as r_file:
             content = r_file.read()
 
-            # Initialize the ids based on the contents
-            # of the file (if empty new dictionary else load the existing one)
             if len(content) == 0:
                 ids = {}
             else:
                 ids = json.loads(content)
 
-            # Check if the id provided already exists in the storage
-            # If it does raise an exception
-            if id in ids:
-                raise IdentityAlreadyExistsException(id)
+            if file_id in ids:
+                raise IdentityAlreadyExistsException(file_id)
 
-            # Store the new id in the dictionary
-            # along with its stats
-            ids[id] = {
-                'position': position,
-                'size': size,
-                'name': name,
-                'extension': extension,
+            ids[file_id] = {
+                'position': file_position,
+                'size': file_size,
+                'name': file_name,
+                'extension': file_extension,
             }
 
-        # Store the new dictionary to a file
-        with open(self.id_storage, 'w') as w_file:
+        with open(self.id_storage_path, 'w') as w_file:
             w_file.write(json.dumps(ids))
 
-    # noinspection PyShadowingBuiltins
-    def load_file(self, id: str):
-        # Load the stats of the file
-        # and deduce the filename and extension
-        # based on them
-        stats = self.__load_id(id)
-        path = f'{self.output}\\{stats["name"]}'
+    def load_file(self, file_id: str):
+        """
+        Load the file from the storage using the provided file_id and save
+        it to the output directory using the file stats dictionary.
 
-        # Open the storage file for reading
-        with open(self.storage, 'r+b') as r_file:
-            # Set the cursor at the specified position
-            r_file.seek(stats['position'], os.SEEK_SET)
+        Buffered writing is used to prevent memory issues with files too large
+        to be stored in memory.
 
-            # Setup a default buffer size
+        :param file_id: File identity
+        """
+
+        file_stats = self.__load_id(file_id)
+        file_name = file_stats['name']
+        file_position = file_stats['position']
+        file_path = f'{self.output_dir_path}\\{file_name}'
+
+        with open(self.storage_path, 'r+b') as r_file:
+            r_file.seek(file_position, os.SEEK_SET)
+
             buffer_size = 65536
-            file_size = stats['size']
+            file_size = file_stats['size']
 
-            # Create/Replace a write file to load
-            # the bytes into
-            with open(path, 'wb') as w_file:
-                # Write chunk by chunk into the file
-                # Until all of the bytes are written
-                while True:
+            with open(file_path, 'wb') as w_file:
+                while file_size != 0:
                     if buffer_size > file_size:
                         w_file.write(r_file.read(file_size))
-                        break
+                        file_size -= file_size
+                    else:
+                        w_file.write(r_file.read(buffer_size))
+                        file_size -= buffer_size
 
-                    w_file.write(r_file.read(buffer_size))
-                    file_size -= buffer_size
+    def __load_id(self, file_id: str):
+        """
+        Load the id storage and look for the specified file stats.
+        If they exists return them otherwise a raise an error.
 
-    # noinspection PyShadowingBuiltins
-    def __load_id(self, id: str):
-        # Open the id storage file
-        # with reading permissions
-        with open(self.id_storage, 'r') as r_file:
-            # Read and store the file content
+        :param file_id: File identity
+        :return: Dict of the file stats
+        """
+
+        with open(self.id_storage_path, 'r') as r_file:
             content = r_file.read()
 
-            # If the file is empty then the id
-            # is not stored
             if len(content) == 0:
-                raise IdentityNotStoredException(id)
+                raise IdentityNotStoredException(file_id)
 
-            # Load the content into ids dictionary
             ids = json.loads(content)
 
-            # Check if the id is contained
-            # within the ids dictionary and return it
-            if id in ids:
-                return ids[id]
+            if file_id in ids:
+                return ids[file_id]
             else:
-                raise IdentityNotStoredException(id)
+                raise IdentityNotStoredException(file_id)
 
-    # noinspection PyShadowingBuiltins
-    def destroy_file(self, id: str):
-        # Load the stats and setup the variables
-        # of the id specified for destruction
-        stats = self.__load_id(id)
+    def destroy_file(self, file_id: str):
+        """
+        Destroy the file from the storage by replacing all of its bytes to null bytes and
+        finalize the process by deleting its id from the id storage.
+
+        :param file_id: File identity
+        """
+
+        file_stats = self.__load_id(file_id)
+        file_position = file_stats['position']
+        file_size = file_stats['size']
         buffer_size = 65536
-        file_position = stats['position']
-        file_size = stats['size']
 
-        with open(self.storage, 'r+b') as w_file:
-            # Set the cursor to the file position in the storage
+        with open(self.storage_path, 'r+b') as w_file:
             w_file.seek(file_position, os.SEEK_SET)
 
-            # Replace all the file bytes will null bytes
-            # until all are replaced
             while file_size != 0:
                 if buffer_size > file_size:
-                    nullbytes = self.__create_nullbytes(file_size)
+                    w_file.write(bytearray(file_size))
                     file_size -= file_size
                 else:
-                    nullbytes = self.__create_nullbytes(buffer_size)
+                    w_file.write(bytearray(buffer_size))
                     file_size -= buffer_size
 
-                w_file.write(nullbytes)
+        self.__destroy_id(file_id)
 
-        # Remove the file id from the id storage
-        self.__destroy_id(id)
+    def __destroy_id(self, file_id: str):
+        """
+        Remove the file id from the id storage if it exists.
 
-    # noinspection PyShadowingBuiltins
-    def __destroy_id(self, id: str):
-        # Open the id storage file
-        # with reading permissions
-        with open(self.id_storage, 'r') as r_file:
-            # Read and store the file content
+        :param file_id: File identity
+        :return: Boolean based on the success of the operation
+        """
+
+        with open(self.id_storage_path, 'r') as r_file:
             content = r_file.read()
 
-            # If there is nothing inside the file
-            # then there is nothing that can be removed
             if len(content) == 0:
                 return False
 
-            # Load the json contents into ids
             ids = json.loads(content)
 
-            # Check if a id exists and if it does not
-            # return false
-            if ids.pop(id, None) is None:
+            if ids.pop(file_id, None) is None:
                 return False
 
-        # If an id exists then rewrite the new json
-        # to the id storage
-        with open(self.id_storage, 'w') as w_file:
+        with open(self.id_storage_path, 'w') as w_file:
             w_file.write(json.dumps(ids))
 
         return True
 
-    # noinspection PyMethodMayBeStatic
-    def __create_nullbytes(self, size):
-        bytes_list = []
-        for i in range(size):
-            bytes_list.append('\x00')
 
-        return ''.join(bytes_list).encode()
-
-
-# Raise this exception when the file provided
-# is invalid or cannot be found
 class FileNotFoundException(Exception):
-    def __init__(self, path: str):
-        self.path = path
+    """
+    Exception class that raises an exception when the file provided
+    is invalid or cannot be found.
+    """
+
+    def __init__(self, file_path: str):
+        """
+        Initialize the exception class by storing the path of the file
+        that does not exist or is invalid.
+
+        :param file_path: Unknown file path
+        """
+        self.file_path = file_path
 
     def __str__(self):
-        return f'File {self.path} not found'
+        return f'File {self.file_path} not found'
 
 
-# Raise this exception when the program tries to store
-# an id that already exists inside the id storage
 class IdentityAlreadyExistsException(Exception):
-    # noinspection PyShadowingBuiltins
-    def __init__(self, id: str):
-        self.id = id
+    """
+    Exception class that raises an exception when the program tries to
+    store an id that already exists inside the id storage.
+    """
+
+    def __init__(self, file_id: str):
+        """
+        Initialize the exception class by storing the id that already exists
+        in the id storage.
+
+        :param file_id: File identity
+        """
+
+        self.file_id = file_id
 
     def __str__(self):
-        return f'Id "{self.id}" already exists'
+        return f'Id "{self.file_id}" already exists'
 
 
-# Raise this exception when the id provided does not
-# exist inside the id storage
 class IdentityNotStoredException(Exception):
-    # noinspection PyShadowingBuiltins
-    def __init__(self, id: str):
-        self.id = id
+    """
+    Exception class that raises an exception when the id provided does not
+    exist inside the id storage.
+    """
+
+    def __init__(self, file_id: str):
+        """
+        Initialize the exception class by storing the id that was not
+        yet stored.
+
+        :param file_id: File identity
+        """
+        self.file_id = file_id
 
     def __str__(self):
-        return f'Id {self.id} not stored'
+        return f'Id {self.file_id} not stored'
 
 
-# Raise this exception when an invalid directory is specified
-# Also if no directory is specified
 class DirectoryNotSpecifiedException(Exception):
-    def __init__(self, path: str):
-        self.path = path
+    """
+    Exception class that raises an exception when the directory provided
+    is either not a directory or does not exist.
+    """
+
+    def __init__(self, file_path: str):
+        """
+        Initialize the exception class by storing the invalid directory
+        path provided.
+
+        :param file_path: Invalid directory path
+        """
+        self.file_path = file_path
 
     def __str__(self):
-        return f'File {self.path} is not a directory'
+        return f'File {self.file_path} is not a directory'
